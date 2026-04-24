@@ -1,94 +1,162 @@
 import streamlit as st
+from dotenv import load_dotenv
+import os
 
-# ── Page config (always must be first) ──────────────────────────
+load_dotenv()
+
+from modules.pre_disaster import show_pre_disaster
+from modules.present_disaster import show_present_disaster
+from modules.post_disaster import show_post_disaster
+
 st.set_page_config(
-    page_title="Disaster Response Allocator",
-    page_icon="🚨",
+    page_title="DisasterSense",
+    page_icon="🌍",
     layout="wide"
 )
 
-# ── Title section ────────────────────────────────────────────────
-st.title("🚨 Disaster Response Resource Allocator")
-st.markdown("AI-powered emergency classification and resource allocation system.")
-st.divider()
-
-# ── SIDEBAR ──────────────────────────────────────────────────────
-with st.sidebar:
-    st.image("https://img.icons8.com/emoji/96/ambulance-emoji.png", width=60)
-    st.title("Control Panel")
-    st.divider()
-
-    st.subheader("📊 Resource Status")
-
-    # These are fake numbers for now — we'll make them dynamic later
-    st.metric(label="🚑 Ambulances", value="5 available")
-    st.metric(label="🚒 Fire Trucks", value="3 available")
-    st.metric(label="⛵ Rescue Boats", value="2 available")
-
-    st.divider()
-
-    st.subheader("🔍 Filter Incidents")
-    filter_type = st.selectbox(
-        "Emergency Type",
-        ["All", "Medical", "Fire", "Flood", "Trapped", "Other"]
-    )
-    filter_severity = st.selectbox(
-        "Severity",
-        ["All", "Critical", "High", "Medium", "Low"]
-    )
-
-    st.divider()
-    st.caption("Nexora Hackathon 2026 — Team Project")
-
-# ── MAIN AREA ────────────────────────────────────────────────────
-
-# Split into 2 columns
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.subheader("📢 Submit Emergency Post")
-
-    # Sample posts button — helps during demo
-    if st.button("Load Sample Posts 📋"):
-        st.session_state.sample_loaded = True
-
-    # Text input box
-    post_input = st.text_area(
-        "Paste a social media post here:",
-        height=120,
-        placeholder='e.g. "Help! We are trapped on 3rd floor in Koramangala, water rising fast!!"',
-    )
-
-    # Submit button
-    submit = st.button("🚨 Classify & Allocate Resource", type="primary")
-
-    # Show message when submitted
-    if submit:
-        if post_input.strip() == "":
-            st.warning("Please enter a post before submitting!")
-        else:
-            st.success("Post received! AI is analyzing... (AI connection coming in Step 8)")
-            st.info(f"Post: {post_input}")
-
-with col2:
-    st.subheader("📋 Incident Log")
-
-    # Placeholder table — will be replaced with real data in Step 12
-    st.info("Classified incidents will appear here after submission.")
-
-    # Sample data to show how it'll look
-    import pandas as pd
-    sample_data = {
-        "Post Preview": ["Help trapped in Koramangala...", "Fire near MG Road...", "Medical emergency HSR..."],
-        "Type": ["Flood", "Fire", "Medical"],
-        "Severity": ["Critical", "High", "High"],
-        "Resource Assigned": ["Rescue Boat", "Fire Truck", "Ambulance"],
-        "Status": ["🔴 Active", "🔴 Active", "🟡 Responding"]
+# ── Custom CSS ──────────────────────────────────────────
+st.markdown("""
+<style>
+    .stApp {
+        background-color: #0f1117;
     }
-    df = pd.DataFrame(sample_data)
-    st.dataframe(df, use_container_width=True)
+    section[data-testid="stSidebar"] {
+        background-color: #1a1d27;
+        border-right: 1px solid #2e3250;
+    }
+    div[data-testid="metric-container"] {
+        background-color: #1e2130;
+        border: 1px solid #2e3250;
+        border-radius: 10px;
+        padding: 15px;
+    }
+    .stButton > button {
+        border-radius: 8px;
+        font-weight: 600;
+        transition: 0.2s;
+    }
+    .streamlit-expanderHeader {
+        background-color: #1e2130;
+        border-radius: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        font-weight: 600;
+        font-size: 15px;
+    }
+    .stProgress > div > div {
+        background-color: #4e8df5;
+    }
+    .stAlert {
+        border-radius: 10px;
+    }
+    h1 { color: #ffffff; }
+    h2 { color: #e0e0e0; }
+    h3 { color: #c0c0c0; }
+</style>
+""", unsafe_allow_html=True)
 
-# ── BOTTOM SECTION — Map placeholder ─────────────────────────────
-st.divider()
-st.subheader("🗺️ Incident Map")
-st.info("Live map will appear here after Step 11 — once incidents are classified with locations.")
+# ── Sidebar ─────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("""
+    <div style='text-align: center; padding: 10px 0 20px 0;'>
+        <h1 style='font-size: 2rem; margin-bottom: 0;'>🌍</h1>
+        <h2 style='font-size: 1.4rem; color: #ffffff; margin-top: 5px;'>DisasterSense</h2>
+        <p style='color: #888; font-size: 0.85rem; margin-top: -5px;'>
+            AI-Powered Disaster Intelligence
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    page = st.radio(
+        "Navigate",
+        ["🏠 Home", "🟡 Pre-Disaster", "🔴 Present Disaster", "🟢 Post-Disaster"],
+        label_visibility="collapsed"
+    )
+
+    st.markdown("---")
+
+    st.markdown("#### 📖 How to Use")
+    st.markdown("""
+- **🟡 Pre-Disaster** — Check real-time risk levels for floods, wildfires & cyclones before they hit
+- **🔴 Present Disaster** — Monitor live news & report incidents happening right now  
+- **🟢 Post-Disaster** — Find nearby hospitals & shelters in affected areas
+    """)
+
+    st.markdown("---")
+
+    st.markdown("""
+    <div style='text-align: center; color: #555; font-size: 0.78rem;'>
+        Built for Nexora Hackathon<br>
+        Powered by Gemini AI · OpenWeatherMap · NewsAPI · OpenStreetMap
+    </div>
+    """, unsafe_allow_html=True)
+
+# ── Page Routing ─────────────────────────────────────────
+if page == "🏠 Home":
+    st.markdown("""
+    <div style='text-align: center; padding: 40px 0 30px 0;'>
+        <h1 style='font-size: 3rem;'>🌍 DisasterSense</h1>
+        <h3 style='color: #888; font-weight: 400;'>
+            AI-Powered Disaster Intelligence Platform
+        </h3>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("""
+        <div style='background:#1e2130; border:1px solid #2e3250;
+                    border-radius:12px; padding:20px; text-align:center; min-height:240px;'>
+            <h1 style='font-size:2.5rem;'>🟡</h1>
+            <h3 style='color:#ffffff; font-size:1rem;'>Pre-Disaster</h3>
+            <p style='color:#888; font-size:0.82rem;'>Real-time flood, wildfire & cyclone risk using live weather data</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("""
+        <div style='background:#1e2130; border:1px solid #2e3250;
+                    border-radius:12px; padding:20px; text-align:center; min-height:240px;'>
+            <h1 style='font-size:2.5rem;'>🔴</h1>
+            <h3 style='color:#ffffff; font-size:1rem;'>Present Disaster</h3>
+            <p style='color:#888; font-size:0.82rem;'>Live news monitoring with AI legitimacy scoring & manual reporting</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown("""
+        <div style='background:#1e2130; border:1px solid #2e3250;
+                    border-radius:12px; padding:20px; text-align:center; min-height:240px;'>
+            <h1 style='font-size:2.5rem;'>🟢</h1>
+            <h3 style='color:#ffffff; font-size:1rem;'>Post-Disaster</h3>
+            <p style='color:#888; font-size:0.82rem;'>Find nearby hospitals, shelters & clinics in affected areas</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<br><br>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style='background:#1e2130; border:1px solid #2e3250;
+                border-radius:12px; padding:25px; text-align:center;'>
+        <h3 style='color:#ffffff;'>⚡ Powered By</h3>
+        <p style='color:#888;'>
+            🤖 Gemini AI &nbsp;·&nbsp; 🌤️ OpenWeatherMap &nbsp;·&nbsp; 
+            📰 NewsAPI &nbsp;·&nbsp; 🗺️ OpenStreetMap
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.info("👈 Select a section from the sidebar to get started")
+
+elif page == "🟡 Pre-Disaster":
+    show_pre_disaster()
+
+elif page == "🔴 Present Disaster":
+    show_present_disaster()
+
+elif page == "🟢 Post-Disaster":
+    show_post_disaster()
