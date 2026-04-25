@@ -45,12 +45,10 @@ MOCK_ARTICLES = [
 def fetch_disaster_news(keyword):
     api_key = os.getenv("NEWS_API_KEY")
 
-    # Split keyword into parts e.g. "Kerala flood" → "Kerala" + "flood"
     parts = keyword.strip().split()
     location = parts[0] if parts else keyword
     disaster = parts[1] if len(parts) > 1 else "disaster"
 
-    # Try 3 progressively broader queries until we get results
     queries = [
         f"{location} {disaster}",
         f"{location} flood OR fire OR cyclone OR earthquake OR disaster OR storm OR emergency",
@@ -67,7 +65,6 @@ def fetch_disaster_news(keyword):
             if response.status_code == 200:
                 articles = response.json().get("articles", [])
                 if articles:
-                    # Filter: at least mention location OR disaster keyword in title/desc
                     filtered = []
                     for a in articles:
                         title = (a.get("title") or "").lower()
@@ -75,18 +72,13 @@ def fetch_disaster_news(keyword):
                         combined = title + " " + desc
                         if location.lower() in combined or disaster.lower() in combined:
                             filtered.append(a)
-
                     if filtered:
                         return filtered
-
-                    # If filter removes everything, return raw results
                     if articles:
                         return articles
-
         except Exception:
             pass
 
-    # All queries failed — return mock
     st.warning("⚠️ Could not reach NewsAPI — showing sample data for demo.")
     return MOCK_ARTICLES
 
@@ -189,6 +181,39 @@ def calculate_legitimacy(article, all_articles):
     return total, scores, reasons
 
 # ─────────────────────────────────────────────
+# RESOURCE RECOMMENDATION
+# ─────────────────────────────────────────────
+
+def get_resource_recommendation(title, description):
+    try:
+        prompt = f"""
+You are a disaster response coordinator in India.
+Based on this verified disaster news, provide a structured resource deployment plan.
+
+News: {title}
+Details: {description or 'No details available'}
+
+Respond ONLY in this exact format, no extra text:
+DISASTER_TYPE: <flood/fire/cyclone/earthquake/other>
+RESOURCES_NEEDED: <comma separated list e.g. rescue boats, medical teams, food supplies>
+ESTIMATED_TEAMS: <number>
+ALERT_AGENCIES: <comma separated e.g. NDRF, Coast Guard, Fire Dept>
+PRIORITY_ACTION: <one sentence - most urgent action to take>
+TIME_WINDOW: <e.g. Act within 6 hours>
+"""
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        lines = text.split("\n")
+        result = {}
+        for line in lines:
+            if ":" in line:
+                key, val = line.split(":", 1)
+                result[key.strip()] = val.strip()
+        return result
+    except:
+        return None
+
+# ─────────────────────────────────────────────
 # EXIF EXTRACTION
 # ─────────────────────────────────────────────
 
@@ -279,6 +304,7 @@ def show_present_disaster():
                             badge = "🔴 LOW LEGITIMACY"
 
                         title = article.get('title') or 'No title'
+
                         with st.expander(
                             f"{badge} ({total_score}/100) — {title[:80]}..."
                         ):
@@ -300,6 +326,73 @@ def show_present_disaster():
                                     st.caption(reasons[criterion])
 
                             st.markdown(f"### Total Score: **{total_score}/100** — {badge}")
+
+                            # ── RESOURCE RECOMMENDATION FOR HIGH LEGITIMACY ──
+                            if total_score >= 70:
+                                st.markdown("---")
+                                st.markdown("### 🚨 AI Resource Deployment Plan")
+                                with st.spinner("Generating resource plan..."):
+                                    rec = get_resource_recommendation(
+                                        article.get("title", ""),
+                                        article.get("description", "")
+                                    )
+
+                                if rec:
+                                    rc1, rc2 = st.columns(2)
+                                    with rc1:
+                                        st.markdown(f"""
+<div style='background:#2a1a1a; border:1px solid #e94560;
+            border-radius:10px; padding:15px;'>
+    <p style='color:#e94560; font-weight:700; margin:0 0 8px 0;'>⚠️ Disaster Type</p>
+    <p style='color:#fff; margin:0;'>{rec.get("DISASTER_TYPE", "Unknown").upper()}</p>
+</div>
+                                        """, unsafe_allow_html=True)
+
+                                        st.markdown("<br>", unsafe_allow_html=True)
+
+                                        st.markdown(f"""
+<div style='background:#1a2a1a; border:1px solid #2ecc71;
+            border-radius:10px; padding:15px;'>
+    <p style='color:#2ecc71; font-weight:700; margin:0 0 8px 0;'>🏥 Resources Needed</p>
+    <p style='color:#fff; margin:0;'>{rec.get("RESOURCES_NEEDED", "N/A")}</p>
+</div>
+                                        """, unsafe_allow_html=True)
+
+                                    with rc2:
+                                        st.markdown(f"""
+<div style='background:#1a1a2a; border:1px solid #4e8df5;
+            border-radius:10px; padding:15px;'>
+    <p style='color:#4e8df5; font-weight:700; margin:0 0 8px 0;'>🏛️ Alert Agencies</p>
+    <p style='color:#fff; margin:0;'>{rec.get("ALERT_AGENCIES", "N/A")}</p>
+</div>
+                                        """, unsafe_allow_html=True)
+
+                                        st.markdown("<br>", unsafe_allow_html=True)
+
+                                        st.markdown(f"""
+<div style='background:#2a2a1a; border:1px solid #f0a500;
+            border-radius:10px; padding:15px;'>
+    <p style='color:#f0a500; font-weight:700; margin:0 0 8px 0;'>👥 Teams Required</p>
+    <p style='color:#fff; margin:0;'>{rec.get("ESTIMATED_TEAMS", "N/A")} response teams</p>
+</div>
+                                        """, unsafe_allow_html=True)
+
+                                    st.markdown("<br>", unsafe_allow_html=True)
+
+                                    st.markdown(f"""
+<div style='background:#1e2130; border:1px solid #e94560;
+            border-radius:10px; padding:15px; text-align:center;'>
+    <p style='color:#e94560; font-weight:700; margin:0 0 5px 0;'>
+        🕐 Time Window: {rec.get("TIME_WINDOW", "Immediate")}
+    </p>
+    <p style='color:#ffffff; font-size:1rem; margin:0;'>
+        ⚡ Priority Action: {rec.get("PRIORITY_ACTION", "Deploy emergency teams immediately")}
+    </p>
+</div>
+                                    """, unsafe_allow_html=True)
+
+                                else:
+                                    st.info("AI resource plan unavailable for this article.")
 
     # ── TAB 2: MANUAL REPORT ─────────────────
     with tab2:
