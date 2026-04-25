@@ -5,7 +5,6 @@ import google.generativeai as genai
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 from datetime import datetime, timezone
-import io
 
 # Setup Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
@@ -40,37 +39,55 @@ MOCK_ARTICLES = [
 ]
 
 # ─────────────────────────────────────────────
-# NEWSAPI FUNCTIONS
+# NEWSAPI FUNCTION
 # ─────────────────────────────────────────────
 
-def fetch_disaster_news(keyword, country=None):
+def fetch_disaster_news(keyword):
     api_key = os.getenv("NEWS_API_KEY")
 
-    # Exact phrase match + disaster keywords
-    query = f'"{keyword}" AND (flood OR fire OR cyclone OR earthquake OR disaster OR emergency OR storm OR landslide OR relief)'
+    # Split keyword into parts e.g. "Kerala flood" → "Kerala" + "flood"
+    parts = keyword.strip().split()
+    location = parts[0] if parts else keyword
+    disaster = parts[1] if len(parts) > 1 else "disaster"
 
-    url = (
-        f"https://newsapi.org/v2/everything?"
-        f"q={query}&sortBy=publishedAt&language=en&pageSize=15&apiKey={api_key}"
-    )
-    try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            articles = response.json().get("articles", [])
+    # Try 3 progressively broader queries until we get results
+    queries = [
+        f"{location} {disaster}",
+        f"{location} flood OR fire OR cyclone OR earthquake OR disaster OR storm OR emergency",
+        f"{location} India news",
+    ]
 
-            # Filter to only articles mentioning keyword in title or description
-            filtered = []
-            for a in articles:
-                title = (a.get("title") or "").lower()
-                desc = (a.get("description") or "").lower()
-                if keyword.lower() in title or keyword.lower() in desc:
-                    filtered.append(a)
+    for query in queries:
+        url = (
+            f"https://newsapi.org/v2/everything?"
+            f"q={query}&sortBy=publishedAt&language=en&pageSize=20&apiKey={api_key}"
+        )
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                articles = response.json().get("articles", [])
+                if articles:
+                    # Filter: at least mention location OR disaster keyword in title/desc
+                    filtered = []
+                    for a in articles:
+                        title = (a.get("title") or "").lower()
+                        desc = (a.get("description") or "").lower()
+                        combined = title + " " + desc
+                        if location.lower() in combined or disaster.lower() in combined:
+                            filtered.append(a)
 
-            return filtered if filtered else articles
+                    if filtered:
+                        return filtered
 
-    except Exception:
-        st.warning("⚠️ Could not reach NewsAPI — showing sample data for demo.")
-        return MOCK_ARTICLES
+                    # If filter removes everything, return raw results
+                    if articles:
+                        return articles
+
+        except Exception:
+            pass
+
+    # All queries failed — return mock
+    st.warning("⚠️ Could not reach NewsAPI — showing sample data for demo.")
     return MOCK_ARTICLES
 
 # ─────────────────────────────────────────────
@@ -88,8 +105,8 @@ def score_source_credibility(source_url):
         return 0, "⚠️ Unknown source"
     for credible in KNOWN_CREDIBLE_SOURCES:
         if credible in source_url.lower():
-            return 25, f"✅ Credible source verified"
-    return 10, f"⚠️ Unverified source"
+            return 25, "✅ Credible source verified"
+    return 10, "⚠️ Unverified source"
 
 def score_timing(published_at):
     try:
@@ -113,17 +130,17 @@ def score_language_with_gemini(title, description):
     try:
         content = f"Headline: {title}\nDescription: {description or 'N/A'}"
         prompt = f"""
-        Analyze this news snippet and rate its legitimacy as a real disaster report on a scale of 0 to 25.
-        Consider: Is the language factual and urgent? Does it sound like a real incident report?
-        Does it avoid sensationalism or clickbait?
+Analyze this news snippet and rate its legitimacy as a real disaster report on a scale of 0 to 25.
+Consider: Is the language factual and urgent? Does it sound like a real incident report?
+Does it avoid sensationalism or clickbait?
 
-        Respond ONLY in this exact format:
-        SCORE: <number between 0-25>
-        REASON: <one sentence explanation>
+Respond ONLY in this exact format:
+SCORE: <number between 0-25>
+REASON: <one sentence explanation>
 
-        Content:
-        {content}
-        """
+Content:
+{content}
+"""
         response = model.generate_content(prompt)
         lines = response.text.strip().split("\n")
         score_line = [l for l in lines if l.startswith("SCORE:")]
@@ -134,7 +151,7 @@ def score_language_with_gemini(title, description):
     except:
         return 10, "🤖 AI analysis completed"
 
-def score_corroboration(articles, current_title):
+def score_corroboration(articles):
     count = len(articles)
     if count >= 7:
         return 25, f"✅ High corroboration: {count} articles found"
@@ -164,7 +181,7 @@ def calculate_legitimacy(article, all_articles):
     scores["Language Analysis"] = s3
     reasons["Language Analysis"] = r3
 
-    s4, r4 = score_corroboration(all_articles, article.get("title", ""))
+    s4, r4 = score_corroboration(all_articles)
     scores["Corroboration"] = s4
     reasons["Corroboration"] = r4
 
@@ -226,6 +243,7 @@ def show_present_disaster():
     # ── TAB 1: NEWS MONITOR ──────────────────
     with tab1:
         st.subheader("🔍 Search Disaster News")
+        st.caption("Tip: Type location + disaster type e.g. 'Kerala flood', 'Mumbai rain', 'Uttarakhand fire'")
 
         col1, col2 = st.columns([3, 1])
         with col1:
@@ -241,16 +259,16 @@ def show_present_disaster():
             if not keyword:
                 st.warning("Please enter a keyword to search.")
             else:
-                with st.spinner("Fetching live news..."):
+                with st.spinner(f"Searching news for '{keyword}'..."):
                     articles = fetch_disaster_news(keyword)
 
                 if not articles:
-                    st.error("No relevant articles found. Try a different keyword like 'Kerala flood' or 'Uttarakhand fire'.")
+                    st.error("No articles found. Try 'Kerala flood' or 'India cyclone'.")
                 else:
-                    st.success(f"Found {len(articles)} relevant articles. Analyzing legitimacy...")
+                    st.success(f"Found {len(articles)} articles. Analyzing top 5...")
 
                     for i, article in enumerate(articles[:5]):
-                        with st.spinner(f"Analyzing article {i+1}..."):
+                        with st.spinner(f"Analyzing article {i+1} of 5..."):
                             total_score, scores, reasons = calculate_legitimacy(article, articles)
 
                         if total_score >= 70:
@@ -260,8 +278,9 @@ def show_present_disaster():
                         else:
                             badge = "🔴 LOW LEGITIMACY"
 
+                        title = article.get('title') or 'No title'
                         with st.expander(
-                            f"{badge} ({total_score}/100) — {article.get('title', 'No title')[:80]}..."
+                            f"{badge} ({total_score}/100) — {title[:80]}..."
                         ):
                             st.markdown(f"**Source:** {article.get('source', {}).get('name', 'Unknown')}")
                             st.markdown(f"**Published:** {article.get('publishedAt', 'Unknown')}")
@@ -291,7 +310,8 @@ def show_present_disaster():
             reporter_name = st.text_input("Your Name (optional)", placeholder="Anonymous")
             disaster_type = st.selectbox(
                 "Type of Disaster",
-                ["Flood", "Wildfire", "Cyclone", "Earthquake", "Landslide", "Industrial Accident", "Other"]
+                ["Flood", "Wildfire", "Cyclone", "Earthquake",
+                 "Landslide", "Industrial Accident", "Other"]
             )
             location_text = st.text_input(
                 "Location Description",
@@ -352,15 +372,15 @@ def show_present_disaster():
                 with st.spinner("AI analyzing report..."):
                     try:
                         prompt = f"""
-                        A disaster has been reported:
-                        Type: {disaster_type}
-                        Location: {location_text}
-                        Severity: {severity}
-                        Description: {description}
+A disaster has been reported:
+Type: {disaster_type}
+Location: {location_text}
+Severity: {severity}
+Description: {description}
 
-                        In 2-3 sentences, give immediate recommended actions for
-                        emergency responders. Be concise and practical.
-                        """
+In 2-3 sentences, give immediate recommended actions for
+emergency responders. Be concise and practical.
+"""
                         ai_response = model.generate_content(prompt)
                         st.markdown("#### 🤖 AI Recommended Actions")
                         st.info(ai_response.text)
