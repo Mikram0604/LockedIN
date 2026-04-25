@@ -7,11 +7,12 @@ from PIL.ExifTags import TAGS, GPSTAGS
 from datetime import datetime, timezone
 import io
 
+# Setup Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 # ─────────────────────────────────────────────
-# NEWSAPI
+# MOCK ARTICLES FALLBACK
 # ─────────────────────────────────────────────
 
 MOCK_ARTICLES = [
@@ -38,21 +39,39 @@ MOCK_ARTICLES = [
     }
 ]
 
-def fetch_disaster_news(keyword):
+# ─────────────────────────────────────────────
+# NEWSAPI FUNCTIONS
+# ─────────────────────────────────────────────
+
+def fetch_disaster_news(keyword, country=None):
     api_key = os.getenv("NEWS_API_KEY")
-    query = f"{keyword} disaster OR flood OR fire OR cyclone OR earthquake OR emergency"
+
+    # Exact phrase match + disaster keywords
+    query = f'"{keyword}" AND (flood OR fire OR cyclone OR earthquake OR disaster OR emergency OR storm OR landslide OR relief)'
+
     url = (
         f"https://newsapi.org/v2/everything?"
-        f"q={query}&sortBy=publishedAt&language=en&pageSize=10&apiKey={api_key}"
+        f"q={query}&sortBy=publishedAt&language=en&pageSize=15&apiKey={api_key}"
     )
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
-            return response.json().get("articles", [])
-        return MOCK_ARTICLES
+            articles = response.json().get("articles", [])
+
+            # Filter to only articles mentioning keyword in title or description
+            filtered = []
+            for a in articles:
+                title = (a.get("title") or "").lower()
+                desc = (a.get("description") or "").lower()
+                if keyword.lower() in title or keyword.lower() in desc:
+                    filtered.append(a)
+
+            return filtered if filtered else articles
+
     except Exception:
         st.warning("⚠️ Could not reach NewsAPI — showing sample data for demo.")
         return MOCK_ARTICLES
+    return MOCK_ARTICLES
 
 # ─────────────────────────────────────────────
 # LEGITIMACY SCORING
@@ -115,7 +134,7 @@ def score_language_with_gemini(title, description):
     except:
         return 10, "🤖 AI analysis completed"
 
-def score_corroboration(articles):
+def score_corroboration(articles, current_title):
     count = len(articles)
     if count >= 7:
         return 25, f"✅ High corroboration: {count} articles found"
@@ -124,7 +143,7 @@ def score_corroboration(articles):
     elif count >= 2:
         return 8, f"⚠️ Low corroboration: {count} articles found"
     else:
-        return 0, f"❌ Very low corroboration: {count} article(s)"
+        return 0, f"❌ Very low corroboration: {count} article(s) found"
 
 def calculate_legitimacy(article, all_articles):
     scores = {}
@@ -145,7 +164,7 @@ def calculate_legitimacy(article, all_articles):
     scores["Language Analysis"] = s3
     reasons["Language Analysis"] = r3
 
-    s4, r4 = score_corroboration(all_articles)
+    s4, r4 = score_corroboration(all_articles, article.get("title", ""))
     scores["Corroboration"] = s4
     reasons["Corroboration"] = r4
 
@@ -211,7 +230,7 @@ def show_present_disaster():
         col1, col2 = st.columns([3, 1])
         with col1:
             keyword = st.text_input(
-                "Enter disaster keyword or location",
+                "Enter location + disaster type",
                 placeholder="e.g. Kerala flood, Chennai cyclone, Uttarakhand fire"
             )
         with col2:
@@ -226,9 +245,9 @@ def show_present_disaster():
                     articles = fetch_disaster_news(keyword)
 
                 if not articles:
-                    st.error("No articles found. Try a different keyword.")
+                    st.error("No relevant articles found. Try a different keyword like 'Kerala flood' or 'Uttarakhand fire'.")
                 else:
-                    st.success(f"Found {len(articles)} articles. Analyzing legitimacy...")
+                    st.success(f"Found {len(articles)} relevant articles. Analyzing legitimacy...")
 
                     for i, article in enumerate(articles[:5]):
                         with st.spinner(f"Analyzing article {i+1}..."):
@@ -253,7 +272,8 @@ def show_present_disaster():
 
                             st.markdown("#### 📊 Legitimacy Breakdown")
                             lc1, lc2 = st.columns(2)
-                            for j, criterion in enumerate(scores.keys()):
+                            criteria = list(scores.keys())
+                            for j, criterion in enumerate(criteria):
                                 col = lc1 if j % 2 == 0 else lc2
                                 with col:
                                     st.markdown(f"**{criterion}**: {scores[criterion]}/25")
@@ -267,33 +287,6 @@ def show_present_disaster():
         st.subheader("📝 Report a Disaster Manually")
         st.markdown("Submit an incident report with photo evidence.")
 
-        # Photo upload OUTSIDE form so we can validate before submit
-        st.markdown("#### 📸 Photo Evidence (Required)")
-        uploaded_image = st.file_uploader(
-            "Upload a photo of the disaster scene",
-            type=["jpg", "jpeg", "png"],
-            key="disaster_photo"
-        )
-
-        if uploaded_image:
-            st.image(uploaded_image, caption="Uploaded photo", use_column_width=True)
-            exif = extract_exif(uploaded_image)
-            if exif:
-                st.markdown("#### 📍 Image Metadata (EXIF)")
-                for key, value in exif.items():
-                    st.markdown(f"**{key}:** {value}")
-                if "GPS_Latitude" in exif and "GPS_Longitude" in exif:
-                    st.success(
-                        f"📍 GPS Location Verified: "
-                        f"{exif['GPS_Latitude']}, {exif['GPS_Longitude']}"
-                    )
-            else:
-                st.info("ℹ️ No EXIF metadata found in this image.")
-        else:
-            st.warning("⚠️ Photo is required to submit a report.")
-
-        st.markdown("---")
-
         with st.form("disaster_report_form"):
             reporter_name = st.text_input("Your Name (optional)", placeholder="Anonymous")
             disaster_type = st.selectbox(
@@ -301,7 +294,7 @@ def show_present_disaster():
                 ["Flood", "Wildfire", "Cyclone", "Earthquake", "Landslide", "Industrial Accident", "Other"]
             )
             location_text = st.text_input(
-                "Location Description *",
+                "Location Description",
                 placeholder="e.g. Near Powai Lake, Mumbai"
             )
             severity = st.select_slider(
@@ -309,34 +302,52 @@ def show_present_disaster():
                 options=["Low", "Moderate", "High", "Critical"]
             )
             description = st.text_area(
-                "Describe the Incident (optional)",
+                "Describe the Incident",
                 placeholder="What happened? How many people are affected?",
                 height=100
+            )
+            uploaded_image = st.file_uploader(
+                "Upload Photo Evidence (optional)",
+                type=["jpg", "jpeg", "png"]
             )
             submit = st.form_submit_button("🚨 Submit Report", type="primary")
 
         if submit:
-            if not uploaded_image:
-                st.error("❌ Please upload a photo before submitting.")
-            elif not location_text:
-                st.error("❌ Please enter a location.")
+            if not location_text or not description:
+                st.warning("Please fill in Location and Description at minimum.")
             else:
                 st.success("✅ Report submitted successfully!")
 
                 col1, col2 = st.columns(2)
+
                 with col1:
                     st.markdown("#### 📋 Report Summary")
                     st.markdown(f"**Reporter:** {reporter_name or 'Anonymous'}")
                     st.markdown(f"**Disaster Type:** {disaster_type}")
                     st.markdown(f"**Location:** {location_text}")
                     st.markdown(f"**Severity:** {severity}")
-                    if description:
-                        st.markdown(f"**Description:** {description}")
+                    st.markdown(f"**Description:** {description}")
                     st.markdown(f"**Submitted At:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
                 with col2:
-                    st.markdown("#### 🖼️ Submitted Photo")
-                    st.image(uploaded_image, use_column_width=True)
+                    if uploaded_image:
+                        st.markdown("#### 🖼️ Uploaded Image")
+                        st.image(uploaded_image, use_column_width=True)
+
+                        st.markdown("#### 📍 Image Metadata (EXIF)")
+                        exif = extract_exif(uploaded_image)
+                        if exif:
+                            for key, value in exif.items():
+                                st.markdown(f"**{key}:** {value}")
+                            if "GPS_Latitude" in exif and "GPS_Longitude" in exif:
+                                st.success(
+                                    f"📍 GPS Verified: "
+                                    f"{exif['GPS_Latitude']}, {exif['GPS_Longitude']}"
+                                )
+                        else:
+                            st.info("ℹ️ No EXIF metadata found in this image.")
+                    else:
+                        st.info("No image uploaded.")
 
                 with st.spinner("AI analyzing report..."):
                     try:
@@ -345,7 +356,7 @@ def show_present_disaster():
                         Type: {disaster_type}
                         Location: {location_text}
                         Severity: {severity}
-                        Description: {description or 'Not provided'}
+                        Description: {description}
 
                         In 2-3 sentences, give immediate recommended actions for
                         emergency responders. Be concise and practical.
