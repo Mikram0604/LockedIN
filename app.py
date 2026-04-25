@@ -17,6 +17,17 @@ st.set_page_config(
     layout="wide"
 )
 
+# ── Tile navigation handler ──────────────────────────────
+_tile_map = {
+    "pre":     "🟡 Pre-Disaster",
+    "present": "🔴 Present Disaster",
+    "post":    "🟢 Post-Disaster",
+}
+_tile_nav = st.query_params.get("tile_nav", "")
+if _tile_nav in _tile_map and st.session_state.get("_last_tile_nav") != _tile_nav:
+    st.session_state["page_radio"] = _tile_map[_tile_nav]
+    st.session_state["_last_tile_nav"] = _tile_nav
+
 # ── Custom CSS ──────────────────────────────────────────
 st.markdown("""
 <style>
@@ -65,6 +76,17 @@ st.markdown("""
         padding: 20px;
         text-align: center;
         min-height: 160px;
+        transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+        cursor: pointer;
+    }
+    .feature-card:hover {
+        border-color: #4e8df5;
+        transform: translateY(-3px);
+        box-shadow: 0 6px 20px rgba(78, 141, 245, 0.2);
+    }
+    a.tile-link {
+        text-decoration: none;
+        display: block;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -84,7 +106,8 @@ with st.sidebar:
     page = st.radio(
         "Navigate",
         ["🏠 Home", "🟡 Pre-Disaster", "🔴 Present Disaster", "🟢 Post-Disaster"],
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        key="page_radio"                          # ← added key
     )
 
     st.markdown("---")
@@ -115,37 +138,43 @@ if page == "🏠 Home":
     </div>
     """, unsafe_allow_html=True)
 
-    # Feature cards
+    # Feature cards — each wrapped in a clickable <a> tag
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown("""
-        <div class='feature-card'>
-            <h2 style='font-size:2rem;'>🟡</h2>
-            <h3 style='color:#fff; font-size:1rem;'>Pre-Disaster</h3>
-            <p style='color:#888; font-size:0.82rem;'>
-                Real-time flood, wildfire & cyclone risk using live weather data
-            </p>
-        </div>
+        <a href="?tile_nav=pre" class="tile-link">
+            <div class='feature-card'>
+                <h2 style='font-size:2rem;'>🟡</h2>
+                <h3 style='color:#fff; font-size:1rem;'>Pre-Disaster</h3>
+                <p style='color:#888; font-size:0.82rem;'>
+                    Real-time flood, wildfire & cyclone risk using live weather data
+                </p>
+            </div>
+        </a>
         """, unsafe_allow_html=True)
     with col2:
         st.markdown("""
-        <div class='feature-card'>
-            <h2 style='font-size:2rem;'>🔴</h2>
-            <h3 style='color:#fff; font-size:1rem;'>Present Disaster</h3>
-            <p style='color:#888; font-size:0.82rem;'>
-                Live news monitoring with AI legitimacy scoring & manual reporting
-            </p>
-        </div>
+        <a href="?tile_nav=present" class="tile-link">
+            <div class='feature-card'>
+                <h2 style='font-size:2rem;'>🔴</h2>
+                <h3 style='color:#fff; font-size:1rem;'>Present Disaster</h3>
+                <p style='color:#888; font-size:0.82rem;'>
+                    Live news monitoring with AI legitimacy scoring & manual reporting
+                </p>
+            </div>
+        </a>
         """, unsafe_allow_html=True)
     with col3:
         st.markdown("""
-        <div class='feature-card'>
-            <h2 style='font-size:2rem;'>🟢</h2>
-            <h3 style='color:#fff; font-size:1rem;'>Post-Disaster</h3>
-            <p style='color:#888; font-size:0.82rem;'>
-                Find nearby hospitals, shelters & clinics in affected areas
-            </p>
-        </div>
+        <a href="?tile_nav=post" class="tile-link">
+            <div class='feature-card'>
+                <h2 style='font-size:2rem;'>🟢</h2>
+                <h3 style='color:#fff; font-size:1rem;'>Post-Disaster</h3>
+                <p style='color:#888; font-size:0.82rem;'>
+                    Find nearby hospitals, shelters & clinics in affected areas
+                </p>
+            </div>
+        </a>
         """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -154,7 +183,6 @@ if page == "🏠 Home":
     st.markdown("### 🗺️ Live Global Disaster Risk Map")
     st.caption("Real-time weather-based risk indicators across major Indian cities")
 
-    # Major Indian cities to monitor
     CITIES = [
         {"name": "Mumbai",     "lat": 19.0760, "lon": 72.8777},
         {"name": "Chennai",    "lat": 13.0827, "lon": 80.2707},
@@ -208,7 +236,6 @@ if page == "🏠 Home":
         else:
             return "LOW", "green", "🟢"
 
-    # Build the map
     m = folium.Map(
         location=[20.5937, 78.9629],
         zoom_start=5,
@@ -239,7 +266,6 @@ if page == "🏠 Home":
             </div>
             """
 
-            # Pulse effect for high risk cities
             if risk_level == "HIGH":
                 folium.CircleMarker(
                     location=[city["lat"], city["lon"]],
@@ -268,10 +294,8 @@ if page == "🏠 Home":
                 "color": color
             })
 
-    # Show map
     st_folium(m, width=None, height=450, returned_objects=[])
 
-    # Risk summary below map
     st.markdown("#### 📊 City Risk Summary")
     cols = st.columns(5)
     for i, cr in enumerate(city_risks):
@@ -297,7 +321,6 @@ if page == "🏠 Home":
     </div>
     """, unsafe_allow_html=True)
 
-# ── OTHER PAGES ──────────────────────────────────────────
 elif page == "🟡 Pre-Disaster":
     show_pre_disaster()
 
